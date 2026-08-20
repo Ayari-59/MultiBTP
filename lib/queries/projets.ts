@@ -433,19 +433,21 @@ export async function syntheseProjet(
   const engageParLot = new Map(engagements.map((e) => [e.lotId ?? "—", nb(e._sum.montantHT)]))
   const realiseParLot = new Map(depenses.map((e) => [e.lotId ?? "—", nb(e._sum.montantHT)]))
 
-  // Budget par lot : le chiffrage donne le montant de vente du lot, on le
-  // ramene au cout de revient au prorata du cout de revient global.
-  const facteurCout = chiffrage && chiffrage.montantHT > 0
-    ? chiffrage.coutRevient / chiffrage.montantHT
-    : 1
-
+  // Budget d'un lot = son cout direct au chiffrage retenu.
+  //
+  // Volontairement pas le cout de revient au prorata : les frais de chantier et
+  // les frais generaux ne s'imputent pas a un corps d'etat, et un marche de
+  // sous-traitance ne couvre que les travaux. Comparer un engagement a un
+  // budget gonfle des frais generaux masquerait les depassements reels.
+  // La difference avec le budget du projet est donc les frais non affectes,
+  // affichee comme telle sur l'ecran budget.
   const lignes: LigneBudget[] = lots.map((l) => {
     const lotChiffre = chiffrage?.lots.find((c) => c.lotId === l.id)
     return {
       lotId: l.id,
       code: l.code,
       nom: l.nom,
-      budget: arrondi((lotChiffre?.montantHT ?? 0) * facteurCout),
+      budget: arrondi(lotChiffre?.coutDirect ?? 0),
       engage: engageParLot.get(l.id) ?? 0,
       realise: realiseParLot.get(l.id) ?? 0,
     }

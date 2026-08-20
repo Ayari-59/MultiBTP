@@ -156,7 +156,23 @@ export function calculerPlanning(
       const suivant = parId.get(d.successeurId)
       const finSuivant = finTard.get(d.successeurId)
       if (!suivant || finSuivant === undefined) continue
-      auPlusTard = Math.min(auPlusTard, finSuivant - suivant.dureeJours - d.decalageJours)
+
+      // La contrainte porte sur la fin au plus tard de la tache courante, mais
+      // le lien peut relier des debuts ou des fins : ignorer le type reviendrait
+      // a traiter tout le planning en fin -> debut, ce qui annule toute marge et
+      // fait apparaitre l'integralite des taches comme critiques.
+      const debutTardSuivant = finSuivant - suivant.dureeJours
+      const contrainte =
+        d.type === "DEBUT_DEBUT"
+          ? // debut(courante) + decalage <= debut(suivante)
+            debutTardSuivant - d.decalageJours + t.dureeJours
+          : d.type === "FIN_FIN"
+            ? // fin(courante) + decalage <= fin(suivante)
+              finSuivant - d.decalageJours
+            : // FIN_DEBUT : fin(courante) + decalage <= debut(suivante)
+              debutTardSuivant - d.decalageJours
+
+      auPlusTard = Math.min(auPlusTard, contrainte)
     }
     finTard.set(id, auPlusTard)
   }

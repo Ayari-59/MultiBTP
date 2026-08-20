@@ -187,7 +187,7 @@ export default async function PageBudget({ params }: { params: Promise<{ id: str
       <Carte>
         <EnteteCarte
           titre="Controle budgetaire par lot"
-          description="Trie par ecart croissant : les depassements apparaissent en premier."
+          description="Budget = cout direct du lot au chiffrage retenu. Trie par ecart croissant."
         />
         {lignes.length === 0 ? (
           <Vide titre="Aucun lot" description="Le chiffrage n'a pas encore ete construit." />
@@ -238,6 +238,30 @@ export default async function PageBudget({ params }: { params: Promise<{ id: str
                   </Td>
                 </Tr>
               ))}
+              <tr className="border-t-2 border-ardoise-200 bg-ardoise-50/60">
+                <Td className="text-xs font-medium text-ardoise-700">
+                  Total des lots (cout direct)
+                </Td>
+                <Td numerique className="text-sm font-semibold">
+                  {euros(lignes.reduce((s, l) => s + l.budget, 0))}
+                </Td>
+                <Td numerique className="text-sm font-semibold">
+                  {euros(lignes.reduce((s, l) => s + l.engage, 0))}
+                </Td>
+                <Td numerique className="text-sm font-semibold">
+                  {euros(lignes.reduce((s, l) => s + l.realise, 0))}
+                </Td>
+                <Td colSpan={4} />
+              </tr>
+              <tr className="bg-ardoise-50/60">
+                <Td className="text-xs text-ardoise-500">
+                  Frais de chantier et frais generaux (non affectes aux lots)
+                </Td>
+                <Td numerique className="text-xs text-ardoise-600">
+                  {euros(budget.budgetActualise - lignes.reduce((s, l) => s + l.budget, 0))}
+                </Td>
+                <Td colSpan={6} />
+              </tr>
             </tbody>
           </Tableau>
         )}

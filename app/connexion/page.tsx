@@ -7,9 +7,9 @@ export const metadata: Metadata = { title: "Connexion" }
 export default async function PageConnexion({
   searchParams,
 }: {
-  searchParams: Promise<{ suite?: string }>
+  searchParams: Promise<{ suite?: string; session?: string }>
 }) {
-  const { suite } = await searchParams
+  const { suite, session } = await searchParams
 
   return (
     <div className="flex min-h-screen">
@@ -53,6 +53,13 @@ export default async function PageConnexion({
           <p className="mt-1 text-sm text-ardoise-500">
             Accedez a vos projets, chiffrages et chantiers.
           </p>
+
+          {session === "expiree" && (
+            <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Votre session a ete fermee : le compte a ete desactive ou n&apos;existe plus.
+              Reconnectez-vous ou contactez votre administrateur.
+            </p>
+          )}
 
           <FormulaireConnexion suite={suite} />
         </div>

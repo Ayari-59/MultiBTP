@@ -22,6 +22,20 @@ export async function requireSession(): Promise<Utilisateur> {
   const session = await auth()
   if (!session?.user?.id) redirect("/connexion")
 
+  // Le JWT survit a la desactivation ou a la suppression du compte : sans cette
+  // verification, un utilisateur revoque garderait l'acces jusqu'a l'expiration
+  // de son jeton. Une lecture indexee par requete, pour que la revocation soit
+  // immediate.
+  const compte = await prisma.user.findFirst({
+    where: {
+      id: session.user.id,
+      organizationId: session.user.organizationId,
+      actif: true,
+    },
+    select: { id: true },
+  })
+  if (!compte) redirect("/api/session-expiree")
+
   return {
     id: session.user.id,
     email: session.user.email,

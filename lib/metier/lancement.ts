@@ -1,4 +1,4 @@
-import { ajouterJoursOuvres, arrondi } from "@/lib/utils"
+import { ajouterJoursOuvres, arrondi, joursEntre } from "@/lib/utils"
 import {
   CATALOGUE_PAR_CODE,
   DUREES_LOT,
@@ -54,8 +54,10 @@ export type TachePropose = {
   dateFin: Date
   dureeJours: number
   ordre: number
-  /** Code du lot precedent : cree une dependance fin -> debut */
+  /** Code du lot precedent : cree une dependance debut -> debut */
   precedentCode: string | null
+  /** Nombre de jours entre le debut du lot precedent et celui-ci */
+  decalageDebutJours: number
 }
 
 export type PropositionProjet = {
@@ -88,7 +90,7 @@ function construireLot(
   trame: LotTrame,
   surface: number,
   prixOrg: PrixOrganisation,
-  margeCible: number
+  params: ParametresEconomiques
 ): LotPropose {
   const postes: PostePropose[] = []
 
@@ -99,11 +101,13 @@ function construireLot(
     const q = quantite(surface, posteTrame)
     if (q <= 0) continue
 
+    // La bibliotheque fournit le **cout** (constate sur vos chantiers), jamais
+    // le prix de vente : celui-ci se deduit toujours de la marge cible du
+    // projet, frais compris. Le chiffrage genere tient donc la marge des le
+    // depart, quel que soit le prix catalogue du poste.
     const connu = prixOrg.get(posteTrame.code)
     const coutUnitaire = connu?.cout ?? ref.cout
-    // Le prix de vente suit la marge cible du projet plutot que le prix
-    // catalogue : le chiffrage genere tient la marge des le depart.
-    const prixUnitaire = connu?.prix ?? prixDepuisCout(coutUnitaire, margeCible)
+    const prixUnitaire = prixDepuisCout(coutUnitaire, params)
 
     postes.push({
       code: ref.code,
@@ -122,9 +126,13 @@ function construireLot(
   const montantHT = arrondi(postes.reduce((s, p) => s + p.totalHT, 0))
   const coutDirect = arrondi(postes.reduce((s, p) => s + p.quantite * p.coutUnitaire, 0))
 
-  // Duree : base par tranche de 100 m², plancher a 3 jours.
+  // Duree : la reference vaut pour 100 m². Elle ne croit pas lineairement avec
+  // la surface — sur un chantier plus grand on met plus d'equipes en parallele.
+  // L'exposant 0,6 traduit ce rendement d'echelle : 1 200 m² demandent environ
+  // 4,4 fois la duree de 100 m², et non 12 fois.
   const base = DUREES_LOT[trame.categorie] ?? 5
-  const dureeJours = Math.max(3, Math.round((base * surface) / 100))
+  const facteurEchelle = Math.pow(Math.max(surface, 1) / 100, 0.6)
+  const dureeJours = Math.max(3, Math.round(base * facteurEchelle))
 
   return {
     code: trame.code,
@@ -143,11 +151,16 @@ function construireLot(
  * Planning previsionnel : les lots s'enchainent dans l'ordre de la trame, avec
  * un recouvrement de 30 % entre lots consecutifs (les corps d'etat ne
  * travaillent jamais strictement l'un apres l'autre sur un chantier reel).
+ *
+ * Le lien genere est donc **debut -> debut avec decalage**, et non fin -> debut :
+ * un enchainement fin -> debut serait viole par le recouvrement lui-meme et
+ * ferait remonter un conflit sur chaque tache, noyant les vrais conflits.
  */
 function construirePlanning(lots: LotPropose[], dateDebut: Date): TachePropose[] {
   const taches: TachePropose[] = []
   let curseur = new Date(dateDebut)
   let precedentCode: string | null = null
+  let debutPrecedent: Date | null = null
 
   lots.forEach((lot, index) => {
     const debut = new Date(curseur)
@@ -161,9 +174,11 @@ function construirePlanning(lots: LotPropose[], dateDebut: Date): TachePropose[]
       dureeJours: lot.dureeJours,
       ordre: index,
       precedentCode,
+      decalageDebutJours: debutPrecedent ? joursEntre(debutPrecedent, debut) : 0,
     })
 
     precedentCode = lot.code
+    debutPrecedent = debut
     const recouvrement = Math.floor(lot.dureeJours * 0.3)
     curseur = ajouterJoursOuvres(debut, Math.max(1, lot.dureeJours - recouvrement))
   })
@@ -190,7 +205,7 @@ export function genererProjet(options: {
   )
 
   const lots = trames
-    .map((t) => construireLot(t, surface, prixOrg, options.params.margeCible))
+    .map((t) => construireLot(t, surface, prixOrg, options.params))
     .filter((l) => l.postes.length > 0)
 
   const taches = construirePlanning(lots, dateDebut)

@@ -1065,7 +1065,12 @@ async function main() {
     const successeurId = tachesP1.get(tache.lotCode)
     if (!predecesseurId || !successeurId) continue
     await prisma.taskDependency.create({
-      data: { predecesseurId, successeurId, type: "FIN_DEBUT" },
+      data: {
+        predecesseurId,
+        successeurId,
+        type: "DEBUT_DEBUT",
+        decalageJours: tache.decalageDebutJours,
+      },
     })
   }
 

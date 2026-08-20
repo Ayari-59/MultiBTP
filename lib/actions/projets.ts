@@ -272,8 +272,15 @@ export async function lancerProjet(
         const predecesseurId = tachesCreees.get(tache.precedentCode)
         const successeurId = tachesCreees.get(tache.lotCode)
         if (!predecesseurId || !successeurId) continue
+        // Debut -> debut avec decalage : les corps d'etat se recouvrent, un
+        // enchainement fin -> debut serait en conflit des la generation.
         await tx.taskDependency.create({
-          data: { predecesseurId, successeurId, type: "FIN_DEBUT" },
+          data: {
+            predecesseurId,
+            successeurId,
+            type: "DEBUT_DEBUT",
+            decalageJours: tache.decalageDebutJours,
+          },
         })
       }
     }

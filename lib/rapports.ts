@@ -717,6 +717,13 @@ export async function rapportReception(
 // ═══════════════════════════════════════════════════════════════════════════
 
 function echapper(valeur: string | number): string {
+  if (typeof valeur === "number") {
+    if (!Number.isFinite(valeur)) return ""
+    // Excel francais attend la virgule decimale — d'ou le point-virgule comme
+    // separateur de colonnes. L'arrondi supprime au passage le bruit de
+    // virgule flottante (5123.599999999999).
+    return (Math.round(valeur * 100) / 100).toString().replace(".", ",")
+  }
   const texte = String(valeur ?? "")
   return /[";\n]/.test(texte) ? `"${texte.replace(/"/g, '""')}"` : texte
 }

@@ -220,9 +220,12 @@ async function lotsEnDerive(organizationId: string) {
       code: true,
       nom: true,
       project: { select: { id: true, nom: true } },
-      contracts: { select: { montantActualise: true } },
       commitments: { where: { statut: { not: "ANNULE" } }, select: { montantHT: true } },
       items: {
+        // Un lot porte les postes de TOUS ses chiffrages (scenario retenu,
+        // variantes, versions anterieures). Sans ce filtre, le budget serait
+        // la somme de toutes les variantes et masquerait les depassements.
+        where: { estimate: { retenu: true } },
         select: {
           quantite: true,
           coutMateriaux: true,

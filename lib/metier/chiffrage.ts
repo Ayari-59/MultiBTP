@@ -234,12 +234,27 @@ export function calculerChiffrage(
 }
 
 /**
- * Prix de vente unitaire deduit d'un cout de revient unitaire et d'une marge
- * cible. Utilise par la generation automatique de chiffrage.
+ * Prix de vente unitaire deduit d'un cout direct unitaire.
+ *
+ * Le cout direct ne suffit pas : les frais de chantier puis les frais generaux
+ * s'ajoutent par-dessus avant que la marge ne se calcule (regle R2). Appliquer
+ * la marge au seul cout direct produirait un chiffrage systematiquement sous la
+ * cible — l'erreur classique du chiffrage au coefficient.
+ *
+ *   coutRevientUnitaire = coutDirect × (1 + fraisChantier) × (1 + fraisGeneraux)
+ *   prixUnitaire        = coutRevientUnitaire / (1 − margeCible)
+ *
+ * Somme sur tous les postes, cela redonne exactement
+ * `montantHT = coutRevient / (1 − margeCible)`, donc une marge egale a la cible.
  */
-export function prixDepuisCout(coutUnitaire: number, margeCible: number): number {
-  const diviseur = 1 - Math.min(Math.max(margeCible, 0), 90) / 100
-  return arrondi(diviseur > 0 ? coutUnitaire / diviseur : coutUnitaire)
+export function prixDepuisCout(coutUnitaire: number, params: ParametresEconomiques): number {
+  const coutRevientUnitaire =
+    coutUnitaire *
+    (1 + params.tauxFraisChantier / 100) *
+    (1 + params.tauxFraisGeneraux / 100)
+
+  const diviseur = 1 - Math.min(Math.max(params.margeCible, 0), 90) / 100
+  return arrondi(diviseur > 0 ? coutRevientUnitaire / diviseur : coutRevientUnitaire)
 }
 
 /** Ventilation par defaut d'un cout direct selon la nature du lot. */
