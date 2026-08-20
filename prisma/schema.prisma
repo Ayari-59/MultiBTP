@@ -1,0 +1,1430 @@
+// BTP Pilote — schema de donnees
+// Toutes les tables metier portent organizationId : isolation multi-tenant.
+// Montants  : Decimal(14,2) en euros HT sauf mention contraire.
+// Quantites : Decimal(14,3).
+// Taux      : Decimal(6,3) en pourcentage (12.5 = 12,5 %).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ORGANISATION & UTILISATEURS
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum OrgPlan {
+  ESSAI
+  STANDARD
+  PREMIUM
+}
+
+model Organization {
+  id       String  @id @default(cuid())
+  nom      String
+  slug     String  @unique
+  /// Prefixe des references projet : BTP -> BTP-2026-014
+  prefixe  String  @default("BTP")
+  siret    String?
+  adresse  String?
+  codePostal String?
+  ville    String?
+  telephone String?
+  email    String?
+  siteWeb  String?
+  logoUrl  String?
+
+  // Parametres de calcul par defaut (surchargeables par projet)
+  tauxTva            Decimal @default(20) @db.Decimal(6, 3)
+  tauxFraisChantier  Decimal @default(4) @db.Decimal(6, 3)
+  tauxFraisGeneraux  Decimal @default(8) @db.Decimal(6, 3)
+  margeCibleDefaut   Decimal @default(18) @db.Decimal(6, 3)
+  tauxRetenueGarantie Decimal @default(5) @db.Decimal(6, 3)
+  seuilAlerteDerive  Decimal @default(2) @db.Decimal(6, 3)
+
+  // Abonnement / quotas
+  plan          OrgPlan  @default(ESSAI)
+  quotaProjets  Int      @default(25)
+  quotaUsers    Int      @default(10)
+  abonnementFin DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users          User[]
+  contacts       Contact[]
+  deals          Deal[]
+  properties     Property[]
+  projects       Project[]
+  priceItems     PriceItem[]
+  subcontractors Subcontractor[]
+  consultations  Consultation[]
+  offers         Offer[]
+  contracts      Contract[]
+  documents      Document[]
+  notifications  Notification[]
+  auditLogs      AuditLog[]
+  conversations  AiConversation[]
+
+  @@map("organizations")
+}
+
+enum UserRole {
+  ADMIN
+  DIRIGEANT
+  CONDUCTEUR
+  METREUR
+  COMPTA
+  SOUS_TRAITANT
+  CLIENT
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  email          String   @unique
+  password       String?
+  name           String
+  telephone      String?
+  fonction       String?
+  role           UserRole @default(CONDUCTEUR)
+  actif          Boolean  @default(true)
+  image          String?
+  emailVerified  DateTime?
+  derniereConnexion DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  /// Renseigne uniquement pour les comptes de role SOUS_TRAITANT
+  subcontractorId String?
+  /// Renseigne uniquement pour les comptes de role CLIENT
+  contactId       String?
+
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subcontractor Subcontractor? @relation(fields: [subcontractorId], references: [id], onDelete: SetNull)
+  contact       Contact?       @relation("ContactComptes", fields: [contactId], references: [id], onDelete: SetNull)
+
+  accounts       Account[]
+  sessions       Session[]
+  projetsDiriges Project[]        @relation("ResponsableProjet")
+  siteReports    SiteReport[]
+  conversations  AiConversation[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CRM
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ContactType {
+  PROSPECT
+  CLIENT
+  PROPRIETAIRE
+  INVESTISSEUR
+  MAITRE_OUVRAGE
+  ARCHITECTE
+  PARTENAIRE
+}
+
+model Contact {
+  id             String      @id @default(cuid())
+  organizationId String
+  type           ContactType @default(PROSPECT)
+  nom            String
+  prenom         String?
+  societe        String?
+  siret          String?
+  email          String?
+  telephone      String?
+  adresse        String?
+  codePostal     String?
+  ville          String?
+  notes          String?     @db.Text
+  origine        String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deals        Deal[]
+  projects     Project[]
+  properties   Property[]
+  interactions Interaction[]
+  comptes      User[]        @relation("ContactComptes")
+
+  @@index([organizationId, type])
+  @@map("contacts")
+}
+
+model Interaction {
+  id        String   @id @default(cuid())
+  contactId String
+  date      DateTime @default(now())
+  canal     String
+  objet     String
+  compteRendu String? @db.Text
+  auteur    String?
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([contactId, date])
+  @@map("interactions")
+}
+
+enum DealStage {
+  NOUVEAU
+  QUALIFICATION
+  ETUDE
+  CHIFFRAGE
+  PROPOSITION
+  NEGOCIATION
+  GAGNE
+  PERDU
+}
+
+model Deal {
+  id             String    @id @default(cuid())
+  organizationId String
+  contactId      String
+  titre          String
+  stage          DealStage @default(NOUVEAU)
+  montantEstime  Decimal?  @db.Decimal(14, 2)
+  probabilite    Int       @default(20)
+  dateCloturePrevue DateTime?
+  motifPerte     String?
+  description    String?   @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  projects     Project[]
+
+  @@index([organizationId, stage])
+  @@map("deals")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BIEN IMMOBILIER
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum PropertyType {
+  APPARTEMENT
+  MAISON
+  IMMEUBLE
+  LOCAL_COMMERCIAL
+  BUREAUX
+  ENTREPOT
+  TERRAIN
+  AUTRE
+}
+
+model Property {
+  id             String       @id @default(cuid())
+  organizationId String
+  contactId      String?
+  nom            String
+  type           PropertyType @default(IMMEUBLE)
+  adresse        String
+  codePostal     String
+  ville          String
+  surfaceUtile   Decimal?     @db.Decimal(12, 2)
+  surfacePlancher Decimal?    @db.Decimal(12, 2)
+  nbLogements    Int?
+  nbNiveaux      Int?
+  anneeConstruction Int?
+  descriptif     String?      @db.Text
+  contraintes    String?      @db.Text
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  projects     Project[]
+
+  @@index([organizationId])
+  @@map("properties")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PROJETS
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ProjectStatus {
+  ETUDE
+  CHIFFRAGE
+  CONSULTATION
+  PREPARATION
+  EN_COURS
+  RECEPTION
+  TERMINE
+  ARCHIVE
+}
+
+enum ProjectPriority {
+  BASSE
+  NORMALE
+  HAUTE
+  CRITIQUE
+}
+
+enum OperationType {
+  RENOVATION_LOURDE
+  RENOVATION_LEGERE
+  REHABILITATION
+  CONSTRUCTION_NEUVE
+  EXTENSION
+  AMENAGEMENT
+  SURELEVATION
+  DEMOLITION
+  VRD
+  AMO
+  CONSEIL
+}
+
+model Project {
+  id             String          @id @default(cuid())
+  organizationId String
+  reference      String
+  nom            String
+  contactId      String?
+  propertyId     String?
+  dealId         String?
+  responsableId  String?
+  typeOperation  OperationType   @default(RENOVATION_LOURDE)
+  statut         ProjectStatus   @default(ETUDE)
+  priorite       ProjectPriority @default(NORMALE)
+
+  adresse    String?
+  codePostal String?
+  ville      String?
+  surface    Decimal? @db.Decimal(12, 2)
+
+  description String? @db.Text
+  contraintes String? @db.Text
+
+  dateDebutPrevue DateTime?
+  dateFinPrevue   DateTime?
+  dateDebutReelle DateTime?
+  dateFinReelle   DateTime?
+  dateReception   DateTime?
+
+  // Parametres economiques (herites de l'organisation puis surchargeables)
+  margeCible        Decimal @default(18) @db.Decimal(6, 3)
+  tauxFraisChantier Decimal @default(4) @db.Decimal(6, 3)
+  tauxFraisGeneraux Decimal @default(8) @db.Decimal(6, 3)
+  tauxTva           Decimal @default(20) @db.Decimal(6, 3)
+
+  /// Prix de vente HT contractualise avec le client (rempli a la signature)
+  prixVenteHT Decimal? @db.Decimal(14, 2)
+  /// Budget de couts fige au lancement du chantier
+  budgetInitial Decimal? @db.Decimal(14, 2)
+
+  avancementPhysique Decimal @default(0) @db.Decimal(6, 3)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  property     Property?    @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  deal         Deal?        @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  responsable  User?        @relation("ResponsableProjet", fields: [responsableId], references: [id], onDelete: SetNull)
+
+  estimates     Estimate[]
+  lots          Lot[]
+  consultations Consultation[]
+  contracts     Contract[]
+  commitments   Commitment[]
+  expenses      Expense[]
+  changeOrders  ChangeOrder[]
+  situations    Situation[]
+  invoices      Invoice[]
+  tasks         Task[]
+  siteReports   SiteReport[]
+  incidents     Incident[]
+  reservations  Reservation[]
+  documents     Document[]
+  photos        SitePhoto[]
+  analyses      RealEstateAnalysis[]
+  conversations AiConversation[]
+  notifications Notification[]
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, statut])
+  @@map("projects")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CHIFFRAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum EstimateScenario {
+  ECONOMIQUE
+  STANDARD
+  PREMIUM
+}
+
+model Estimate {
+  id        String           @id @default(cuid())
+  projectId String
+  nom       String
+  scenario  EstimateScenario @default(STANDARD)
+  version   Int              @default(1)
+  retenu    Boolean          @default(false)
+  /// Genere par l'assistant IA (a valider par l'utilisateur)
+  genereParIa Boolean        @default(false)
+  commentaire String?        @db.Text
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  project Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items   EstimateItem[]
+
+  @@index([projectId])
+  @@map("estimates")
+}
+
+enum LotStatus {
+  A_CHIFFRER
+  CHIFFRE
+  EN_CONSULTATION
+  ATTRIBUE
+  EN_COURS
+  RECEPTIONNE
+}
+
+/// Corps d'etat du projet (electricite, plomberie, gros oeuvre...)
+model Lot {
+  id        String    @id @default(cuid())
+  projectId String
+  code      String
+  nom       String
+  categorie PriceCategory @default(AUTRE)
+  ordre     Int       @default(0)
+  statut    LotStatus @default(A_CHIFFRER)
+  /// true : lot confie a un sous-traitant, false : realise en interne
+  sousTraite Boolean  @default(true)
+  descriptif String?  @db.Text
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  items         EstimateItem[]
+  consultations Consultation[]
+  contracts     Contract[]
+  commitments   Commitment[]
+  expenses      Expense[]
+  changeOrders  ChangeOrder[]
+  tasks         Task[]
+  incidents     Incident[]
+  reservations  Reservation[]
+  photos        SitePhoto[]
+
+  @@unique([projectId, code])
+  @@index([projectId])
+  @@map("lots")
+}
+
+enum Unit {
+  U
+  ML
+  M2
+  M3
+  KG
+  T
+  FORFAIT
+  HEURE
+  JOUR
+  ENS
+}
+
+/// Ligne de chiffrage : un poste de travaux dans un lot
+model EstimateItem {
+  id         String  @id @default(cuid())
+  estimateId String
+  lotId      String
+  priceItemId String?
+  ordre      Int     @default(0)
+
+  designation String
+  description String? @db.Text
+  unite       Unit    @default(U)
+  quantite    Decimal @db.Decimal(14, 3)
+  prixUnitaire Decimal @db.Decimal(14, 2)
+
+  // Ventilation du cout de revient direct (unitaire)
+  coutMateriaux     Decimal @default(0) @db.Decimal(14, 2)
+  coutMainOeuvre    Decimal @default(0) @db.Decimal(14, 2)
+  coutSousTraitance Decimal @default(0) @db.Decimal(14, 2)
+  coutMateriel      Decimal @default(0) @db.Decimal(14, 2)
+  coutTransport     Decimal @default(0) @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  estimate  Estimate   @relation(fields: [estimateId], references: [id], onDelete: Cascade)
+  lot       Lot        @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  priceItem PriceItem? @relation(fields: [priceItemId], references: [id], onDelete: SetNull)
+
+  @@index([estimateId])
+  @@index([lotId])
+  @@map("estimate_items")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BIBLIOTHEQUE DE PRIX
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum PriceCategory {
+  DEMOLITION
+  TERRASSEMENT
+  VRD
+  GROS_OEUVRE
+  MACONNERIE
+  CHARPENTE
+  COUVERTURE
+  ETANCHEITE
+  ISOLATION
+  PLATRERIE
+  MENUISERIE
+  ELECTRICITE
+  PLOMBERIE
+  CHAUFFAGE
+  CLIMATISATION
+  CARRELAGE
+  PEINTURE
+  VOIRIE
+  ESPACES_EXTERIEURS
+  AUTRE
+}
+
+model PriceItem {
+  id             String        @id @default(cuid())
+  organizationId String
+  code           String?
+  designation    String
+  description    String?       @db.Text
+  categorie      PriceCategory
+  unite          Unit          @default(U)
+
+  /// Prix de vente unitaire de reference
+  prixReference Decimal @db.Decimal(14, 2)
+  /// Cout de revient unitaire de reference
+  coutReference Decimal @default(0) @db.Decimal(14, 2)
+
+  prixMin   Decimal? @db.Decimal(14, 2)
+  prixMoyen Decimal? @db.Decimal(14, 2)
+  prixMax   Decimal? @db.Decimal(14, 2)
+
+  fournisseur   String?
+  localisation  String?
+  dateReference DateTime @default(now())
+  actif         Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  historique   PriceHistory[]
+  items        EstimateItem[]
+
+  @@index([organizationId, categorie])
+  @@map("price_items")
+}
+
+/// Releve de prix constate (devis recu, facture, marche signe)
+model PriceHistory {
+  id          String   @id @default(cuid())
+  priceItemId String
+  prix        Decimal  @db.Decimal(14, 2)
+  source      String
+  fournisseur String?
+  projetRef   String?
+  localisation String?
+  date        DateTime @default(now())
+
+  priceItem PriceItem @relation(fields: [priceItemId], references: [id], onDelete: Cascade)
+
+  @@index([priceItemId, date])
+  @@map("price_history")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SOUS-TRAITANTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Subcontractor {
+  id             String  @id @default(cuid())
+  organizationId String
+  raisonSociale  String
+  siret          String?
+  formeJuridique String?
+  contactNom     String?
+  email          String?
+  telephone      String?
+  adresse        String?
+  codePostal     String?
+  ville          String?
+  zoneGeo        String?
+  /// Categories de prestations couvertes
+  specialites    PriceCategory[]
+
+  effectif       Int?
+  caAnnuel       Decimal? @db.Decimal(14, 2)
+  /// Notation globale sur 5
+  notation       Decimal  @default(3) @db.Decimal(3, 2)
+  noteQualite    Decimal  @default(3) @db.Decimal(3, 2)
+  noteDelai      Decimal  @default(3) @db.Decimal(3, 2)
+  noteRelation   Decimal  @default(3) @db.Decimal(3, 2)
+  nbMarches      Int      @default(0)
+  nbLitiges      Int      @default(0)
+
+  assuranceRcValide      Boolean @default(false)
+  assuranceDecennaleValide Boolean @default(false)
+  attestationVigilanceValide Boolean @default(false)
+  dateValiditeDocuments  DateTime?
+
+  actif     Boolean  @default(true)
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  documents    SubcontractorDocument[]
+  invites      ConsultationInvite[]
+  offers       Offer[]
+  contracts    Contract[]
+  tasks        Task[]
+  comptes      User[]
+
+  @@index([organizationId])
+  @@map("subcontractors")
+}
+
+enum SubcontractorDocType {
+  KBIS
+  ASSURANCE_RC
+  ASSURANCE_DECENNALE
+  ATTESTATION_VIGILANCE
+  ATTESTATION_FISCALE
+  RIB
+  QUALIFICATION
+  REFERENCE
+  AUTRE
+}
+
+model SubcontractorDocument {
+  id              String               @id @default(cuid())
+  subcontractorId String
+  type            SubcontractorDocType
+  nom             String
+  url             String
+  dateEmission    DateTime?
+  dateExpiration  DateTime?
+  valide          Boolean              @default(true)
+  createdAt       DateTime             @default(now())
+
+  subcontractor Subcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
+
+  @@index([subcontractorId])
+  @@map("subcontractor_documents")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONSULTATIONS & OFFRES
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ConsultationStatus {
+  BROUILLON
+  ENVOYEE
+  EN_ANALYSE
+  ATTRIBUEE
+  INFRUCTUEUSE
+  ANNULEE
+}
+
+model Consultation {
+  id             String             @id @default(cuid())
+  organizationId String
+  projectId      String
+  lotId          String
+  reference      String
+  objet          String
+  statut         ConsultationStatus @default(BROUILLON)
+  descriptif     String?            @db.Text
+  /// Montant estime issu du chiffrage, sert de base de comparaison
+  budgetEstime   Decimal?           @db.Decimal(14, 2)
+  delaiSouhaiteJours Int?
+  dateEnvoi      DateTime?
+  dateLimiteReponse DateTime?
+  dateDebutSouhaitee DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot          Lot                  @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  invites      ConsultationInvite[]
+  offers       Offer[]
+  questions    ConsultationQuestion[]
+  documents    Document[]
+
+  @@unique([organizationId, reference])
+  @@index([projectId])
+  @@map("consultations")
+}
+
+enum InviteStatus {
+  INVITE
+  VU
+  ACCEPTE
+  REFUSE
+  REPONDU
+}
+
+model ConsultationInvite {
+  id              String       @id @default(cuid())
+  consultationId  String
+  subcontractorId String
+  statut          InviteStatus @default(INVITE)
+  dateEnvoi       DateTime     @default(now())
+  dateVue         DateTime?
+  dateReponse     DateTime?
+  motifRefus      String?
+
+  consultation  Consultation  @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  subcontractor Subcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
+
+  @@unique([consultationId, subcontractorId])
+  @@map("consultation_invites")
+}
+
+model ConsultationQuestion {
+  id             String   @id @default(cuid())
+  consultationId String
+  auteur         String
+  question       String   @db.Text
+  reponse        String?  @db.Text
+  dateQuestion   DateTime @default(now())
+  dateReponse    DateTime?
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+
+  @@index([consultationId])
+  @@map("consultation_questions")
+}
+
+enum OfferStatus {
+  RECUE
+  EN_ANALYSE
+  RETENUE
+  ECARTEE
+}
+
+model Offer {
+  id              String      @id @default(cuid())
+  organizationId  String
+  consultationId  String
+  subcontractorId String
+  reference       String?
+  statut          OfferStatus @default(RECUE)
+
+  montantHT     Decimal  @db.Decimal(14, 2)
+  delaiJours    Int?
+  dateDisponibilite DateTime?
+  validiteJours Int?     @default(90)
+
+  conditionsPaiement String?
+  exclusions         String? @db.Text
+  garanties          String?
+  observations       String? @db.Text
+
+  /// Score calcule par le comparateur (0-100), mis en cache
+  score        Decimal? @db.Decimal(6, 2)
+  /// Synthese produite par l'analyse IA du devis
+  analyseIa    String?  @db.Text
+
+  dateReception DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  consultation  Consultation  @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  subcontractor Subcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
+  lignes        OfferLine[]
+  contract      Contract?
+
+  @@unique([consultationId, subcontractorId])
+  @@index([organizationId])
+  @@map("offers")
+}
+
+model OfferLine {
+  id      String @id @default(cuid())
+  offerId String
+  ordre   Int    @default(0)
+
+  designation  String
+  unite        Unit    @default(U)
+  quantite     Decimal @db.Decimal(14, 3)
+  prixUnitaire Decimal @db.Decimal(14, 2)
+  /// Poste explicitement exclu du devis
+  exclu        Boolean @default(false)
+
+  offer Offer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+
+  @@index([offerId])
+  @@map("offer_lines")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MARCHES (CONTRATS)
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ContractStatus {
+  BROUILLON
+  ENVOYE
+  SIGNE
+  EN_COURS
+  RECEPTIONNE
+  RESILIE
+}
+
+model Contract {
+  id              String         @id @default(cuid())
+  organizationId  String
+  projectId       String
+  lotId           String
+  subcontractorId String
+  offerId         String?        @unique
+  reference       String
+  objet           String
+  statut          ContractStatus @default(BROUILLON)
+
+  montantInitial Decimal @db.Decimal(14, 2)
+  /// Montant initial + avenants valides (recalcule)
+  montantActualise Decimal @db.Decimal(14, 2)
+
+  tauxRetenueGarantie Decimal @default(5) @db.Decimal(6, 3)
+  tauxPenaliteRetard  Decimal @default(0.5) @db.Decimal(6, 3)
+
+  dateSignature DateTime?
+  dateDebut     DateTime?
+  dateFin       DateTime?
+  dateReception DateTime?
+  delaiJours    Int?
+
+  conditions String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project       Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot           Lot           @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  subcontractor Subcontractor @relation(fields: [subcontractorId], references: [id], onDelete: Cascade)
+  offer         Offer?        @relation(fields: [offerId], references: [id], onDelete: SetNull)
+
+  situations   Situation[]
+  invoices     Invoice[]
+  changeOrders ChangeOrder[]
+  commitments  Commitment[]
+
+  @@unique([organizationId, reference])
+  @@index([projectId])
+  @@map("contracts")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  BUDGET : ENGAGEMENTS & DEPENSES
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum CostNature {
+  SOUS_TRAITANCE
+  MATERIAUX
+  MAIN_OEUVRE
+  MATERIEL
+  TRANSPORT
+  FRAIS_CHANTIER
+  FRAIS_GENERAUX
+  HONORAIRES
+  ASSURANCE
+  AUTRE
+}
+
+enum CommitmentStatus {
+  PREVU
+  ENGAGE
+  SOLDE
+  ANNULE
+}
+
+/// Cout engage : marche signe, bon de commande ferme
+model Commitment {
+  id         String           @id @default(cuid())
+  projectId  String
+  lotId      String?
+  contractId String?
+  libelle    String
+  nature     CostNature       @default(SOUS_TRAITANCE)
+  montantHT  Decimal          @db.Decimal(14, 2)
+  statut     CommitmentStatus @default(ENGAGE)
+  date       DateTime         @default(now())
+  reference  String?
+  createdAt  DateTime         @default(now())
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot      Lot?      @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@map("commitments")
+}
+
+/// Cout realise : depense effective rattachee au projet
+model Expense {
+  id        String     @id @default(cuid())
+  projectId String
+  lotId     String?
+  invoiceId String?
+  libelle   String
+  nature    CostNature @default(SOUS_TRAITANCE)
+  montantHT Decimal    @db.Decimal(14, 2)
+  date      DateTime   @default(now())
+  fournisseur String?
+  reference String?
+  createdAt DateTime   @default(now())
+
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot     Lot?     @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  invoice Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@map("expenses")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  AVENANTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ChangeOrderStatus {
+  DEMANDE
+  CHIFFRE
+  ACCEPTE
+  REFUSE
+  ANNULE
+}
+
+enum ChangeOrderOrigin {
+  CLIENT
+  SOUS_TRAITANT
+  ALEA_TECHNIQUE
+  REGLEMENTAIRE
+  INTERNE
+}
+
+model ChangeOrder {
+  id         String            @id @default(cuid())
+  projectId  String
+  lotId      String?
+  contractId String?
+  reference  String
+  motif      String
+  origine    ChangeOrderOrigin @default(CLIENT)
+  statut     ChangeOrderStatus @default(DEMANDE)
+
+  /// Impact sur le cout (positif = surcout)
+  impactCout  Decimal @default(0) @db.Decimal(14, 2)
+  /// Impact sur le prix de vente client
+  impactVente Decimal @default(0) @db.Decimal(14, 2)
+  /// Impact sur le delai en jours
+  impactDelaiJours Int @default(0)
+
+  description String?  @db.Text
+  dateDemande DateTime @default(now())
+  dateDecision DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot      Lot?      @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  contract Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@map("change_orders")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SITUATIONS & FACTURES
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum SituationStatus {
+  DEPOSEE
+  EN_VERIFICATION
+  VALIDEE
+  REJETEE
+}
+
+/// Situation de travaux mensuelle d'un sous-traitant
+model Situation {
+  id         String          @id @default(cuid())
+  projectId  String
+  contractId String
+  numero     Int
+  periode    String
+  statut     SituationStatus @default(DEPOSEE)
+
+  /// Avancement cumule declare (%)
+  avancementCumule Decimal @db.Decimal(6, 3)
+  /// Montant cumule facture par les situations precedentes validees
+  cumulPrecedent   Decimal @default(0) @db.Decimal(14, 2)
+  /// Montant de la situation courante
+  montantHT        Decimal @db.Decimal(14, 2)
+  retenueGarantie  Decimal @default(0) @db.Decimal(14, 2)
+  netAPayer        Decimal @default(0) @db.Decimal(14, 2)
+
+  observations String?  @db.Text
+  dateDepot    DateTime @default(now())
+  dateValidation DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contract Contract  @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+
+  @@unique([contractId, numero])
+  @@index([projectId])
+  @@map("situations")
+}
+
+enum InvoiceDirection {
+  FOURNISSEUR
+  CLIENT
+}
+
+enum InvoiceStatus {
+  A_VALIDER
+  VALIDEE
+  PAYEE
+  LITIGE
+  ANNULEE
+}
+
+model Invoice {
+  id             String           @id @default(cuid())
+  projectId      String
+  contractId     String?
+  situationId    String?
+  sens           InvoiceDirection @default(FOURNISSEUR)
+  numero         String
+  emetteur       String
+  statut         InvoiceStatus    @default(A_VALIDER)
+
+  montantHT  Decimal @db.Decimal(14, 2)
+  tauxTva    Decimal @default(20) @db.Decimal(6, 3)
+  montantTTC Decimal @db.Decimal(14, 2)
+
+  dateEmission  DateTime  @default(now())
+  dateEcheance  DateTime?
+  datePaiement  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  contract  Contract?  @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  situation Situation? @relation(fields: [situationId], references: [id], onDelete: SetNull)
+  expenses  Expense[]
+
+  @@index([projectId, statut])
+  @@map("invoices")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PLANNING
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum TaskStatus {
+  A_FAIRE
+  EN_COURS
+  TERMINE
+  BLOQUE
+}
+
+model Task {
+  id              String     @id @default(cuid())
+  projectId       String
+  lotId           String?
+  subcontractorId String?
+  nom             String
+  statut          TaskStatus @default(A_FAIRE)
+  ordre           Int        @default(0)
+
+  dateDebut     DateTime
+  dateFin       DateTime
+  dateDebutReelle DateTime?
+  dateFinReelle DateTime?
+  dureeJours    Int
+  avancement    Decimal    @default(0) @db.Decimal(6, 3)
+  /// Tache jalon (duree nulle)
+  jalon         Boolean    @default(false)
+  responsable   String?
+  commentaire   String?    @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot           Lot?           @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  subcontractor Subcontractor? @relation(fields: [subcontractorId], references: [id], onDelete: SetNull)
+
+  dependances TaskDependency[] @relation("TacheSuivante")
+  prerequis   TaskDependency[] @relation("TachePrecedente")
+
+  @@index([projectId])
+  @@map("tasks")
+}
+
+enum DependencyType {
+  FIN_DEBUT
+  DEBUT_DEBUT
+  FIN_FIN
+}
+
+model TaskDependency {
+  id            String         @id @default(cuid())
+  /// Tache qui doit etre realisee avant
+  predecesseurId String
+  /// Tache qui depend de la precedente
+  successeurId  String
+  type          DependencyType @default(FIN_DEBUT)
+  decalageJours Int            @default(0)
+
+  predecesseur Task @relation("TachePrecedente", fields: [predecesseurId], references: [id], onDelete: Cascade)
+  successeur   Task @relation("TacheSuivante", fields: [successeurId], references: [id], onDelete: Cascade)
+
+  @@unique([predecesseurId, successeurId])
+  @@map("task_dependencies")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  SUIVI DE CHANTIER
+// ═══════════════════════════════════════════════════════════════════════════
+
+model SiteReport {
+  id        String   @id @default(cuid())
+  projectId String
+  auteurId  String?
+  date      DateTime @default(now())
+  meteo     String?
+  effectif  Int?
+  travauxRealises String? @db.Text
+  observations    String? @db.Text
+  decisions       String? @db.Text
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  auteur  User?   @relation(fields: [auteurId], references: [id], onDelete: SetNull)
+  photos  SitePhoto[]
+
+  @@index([projectId, date])
+  @@map("site_reports")
+}
+
+model SitePhoto {
+  id           String   @id @default(cuid())
+  projectId    String
+  lotId        String?
+  siteReportId String?
+  url          String
+  legende      String?
+  localisation String?
+  date         DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  project    Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot        Lot?        @relation(fields: [lotId], references: [id], onDelete: SetNull)
+  siteReport SiteReport? @relation(fields: [siteReportId], references: [id], onDelete: SetNull)
+
+  @@index([projectId])
+  @@map("site_photos")
+}
+
+enum IncidentSeverity {
+  MINEUR
+  MODERE
+  MAJEUR
+  CRITIQUE
+}
+
+enum IncidentStatus {
+  OUVERT
+  EN_TRAITEMENT
+  RESOLU
+  CLOS
+}
+
+model Incident {
+  id        String           @id @default(cuid())
+  projectId String
+  lotId     String?
+  titre     String
+  gravite   IncidentSeverity @default(MODERE)
+  statut    IncidentStatus   @default(OUVERT)
+  description String?        @db.Text
+  actionCorrective String?   @db.Text
+  impactCout Decimal         @default(0) @db.Decimal(14, 2)
+  impactDelaiJours Int       @default(0)
+  dateOuverture DateTime     @default(now())
+  dateCloture   DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot     Lot?    @relation(fields: [lotId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, statut])
+  @@map("incidents")
+}
+
+enum ReservationStatus {
+  OUVERTE
+  LEVEE
+  REFUSEE
+}
+
+/// Reserve emise lors d'un controle ou de la reception
+model Reservation {
+  id        String            @id @default(cuid())
+  projectId String
+  lotId     String?
+  libelle   String
+  localisation String?
+  statut    ReservationStatus @default(OUVERTE)
+  dateEmission DateTime       @default(now())
+  dateLevee    DateTime?
+  dateLimite   DateTime?
+  commentaire  String?        @db.Text
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  lot     Lot?    @relation(fields: [lotId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, statut])
+  @@map("reservations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  GESTION DOCUMENTAIRE
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum DocumentCategory {
+  ADMINISTRATIF
+  PLANS
+  DEVIS
+  MARCHES
+  SOUS_TRAITANTS
+  PLANNING
+  SITUATIONS
+  FACTURES
+  PHOTOS
+  PV
+  RECEPTION
+  AUTRE
+}
+
+model Document {
+  id             String           @id @default(cuid())
+  organizationId String
+  projectId      String?
+  consultationId String?
+  categorie      DocumentCategory @default(AUTRE)
+  nom            String
+  description    String?
+  url            String
+  mimeType       String?
+  taille         Int?
+  version        Int              @default(1)
+  /// Visible par le client dans son espace
+  visibleClient  Boolean          @default(false)
+  /// Joint aux consultations envoyees aux sous-traitants
+  visibleSousTraitant Boolean     @default(false)
+  auteur         String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project?      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  consultation Consultation? @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([projectId, categorie])
+  @@map("documents")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONSEIL IMMOBILIER
+// ═══════════════════════════════════════════════════════════════════════════
+
+model RealEstateAnalysis {
+  id        String @id @default(cuid())
+  projectId String
+  nom       String
+
+  prixAcquisition   Decimal @default(0) @db.Decimal(14, 2)
+  fraisAcquisition  Decimal @default(0) @db.Decimal(14, 2)
+  montantTravaux    Decimal @default(0) @db.Decimal(14, 2)
+  fraisDivers       Decimal @default(0) @db.Decimal(14, 2)
+
+  apport            Decimal @default(0) @db.Decimal(14, 2)
+  montantEmprunt    Decimal @default(0) @db.Decimal(14, 2)
+  tauxCredit        Decimal @default(3.5) @db.Decimal(6, 3)
+  dureeCreditAnnees Int     @default(20)
+
+  valeurApresTravaux Decimal @default(0) @db.Decimal(14, 2)
+  fraisRevente       Decimal @default(0) @db.Decimal(14, 2)
+  loyerMensuel       Decimal @default(0) @db.Decimal(14, 2)
+  chargesAnnuelles   Decimal @default(0) @db.Decimal(14, 2)
+  tauxImposition     Decimal @default(30) @db.Decimal(6, 3)
+
+  commentaire String?  @db.Text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("real_estate_analyses")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  IA & SYSTEME
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AiConversation {
+  id             String   @id @default(cuid())
+  organizationId String
+  projectId      String?
+  userId         String?
+  titre          String   @default("Nouvelle conversation")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  messages     AiMessage[]
+
+  @@index([organizationId])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String
+  contenu        String   @db.Text
+  /// Fournisseur ayant produit la reponse (anthropic, local...)
+  fournisseur    String?
+  createdAt      DateTime @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("ai_messages")
+}
+
+enum NotificationLevel {
+  INFO
+  ALERTE
+  CRITIQUE
+}
+
+model Notification {
+  id             String            @id @default(cuid())
+  organizationId String
+  userId         String?
+  projectId      String?
+  niveau         NotificationLevel @default(INFO)
+  type           String
+  titre          String
+  message        String            @db.Text
+  lien           String?
+  lu             Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project      Project?     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, lu])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String?
+  action         String
+  entite         String
+  entiteId       String?
+  details        String?  @db.Text
+  ip             String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}

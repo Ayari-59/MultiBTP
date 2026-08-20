@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+/*
+  BTP Pilote — systeme visuel
+  Registre volontairement industriel : bleu ardoise profond pour la structure,
+  ambre pour tout ce qui touche au chantier et aux alertes. Densite elevee,
+  tableaux lisibles, aucun effet decoratif superflu.
+*/
+
+@theme {
+  --color-ardoise-50: #f4f6f8;
+  --color-ardoise-100: #e6ebf0;
+  --color-ardoise-200: #cbd6e0;
+  --color-ardoise-300: #a3b6c8;
+  --color-ardoise-400: #6f8ba7;
+  --color-ardoise-500: #4c6b8a;
+  --color-ardoise-600: #3a5470;
+  --color-ardoise-700: #2c4058;
+  --color-ardoise-800: #1d2d40;
+  --color-ardoise-900: #131f2d;
+  --color-ardoise-950: #0a1119;
+
+  --color-chantier-50: #fff9ed;
+  --color-chantier-100: #fff1d4;
+  --color-chantier-200: #ffdfa8;
+  --color-chantier-300: #ffc670;
+  --color-chantier-400: #ffa236;
+  --color-chantier-500: #f9860f;
+  --color-chantier-600: #e06a06;
+  --color-chantier-700: #b94f08;
+  --color-chantier-800: #933e0e;
+  --color-chantier-900: #78350f;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+}
+
+:root {
+  --fond: #f5f6f8;
+  --surface: #ffffff;
+  --bordure: #e4e8ed;
+  --texte: #131f2d;
+  --texte-doux: #5c6b7d;
+}
+
+* {
+  border-color: var(--bordure);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--fond);
+  color: var(--texte);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "tnum";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Les chiffres s'alignent verticalement dans les tableaux financiers. */
+.tabulaire {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Barre de defilement discrete sur les tableaux larges */
+.defilement-fin::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+.defilement-fin::-webkit-scrollbar-thumb {
+  background: var(--color-ardoise-200);
+  border-radius: 999px;
+}
+.defilement-fin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media print {
+  .sans-impression {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+  }
+}
